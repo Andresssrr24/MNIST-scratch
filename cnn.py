@@ -60,9 +60,9 @@ def forward(A_prev, W, b, hparameters):
 
                     Z[i, h, w, c] = np.sum(a_slice_prev *  weights) + biases
 
-    cache = (A_prev, W, b, hparameters)
+    conv_cache = (A_prev, W, b, hparameters)
 
-    return Z, cache
+    return Z, conv_cache
 
 def max_pooling(A_prev, hparameters):
     '''
@@ -102,11 +102,11 @@ def max_pooling(A_prev, hparameters):
 
                     A[i, h, w, c] = np.max(a_prev_slice)
 
-    cache = (A_prev, hparameters)
+    pool_cache = (A_prev, hparameters)
 
-    return A, cache
+    return A, pool_cache
 
-def conv_backward(dZ, cache):
+def conv_backward(dZ, conv_cache):
     '''
     Backpropagation for a convolutional function
 
@@ -117,6 +117,45 @@ def conv_backward(dZ, cache):
     Returns:
     dA_prev: np.ndarray -> Gradient of the loss respect to the previous input of the conv layers, shape of (m, nH_prev, nW_prev, nC_prev)
     dW: np.ndarray -> Gradient respect to the weights of the conv layers, shape of (f, f, nC_prev, nC)
-    db: np.ndarrau -> Gradient respect to the biases of the conv layers, shape of (1, 1, 1, nC)
+    db: np.ndarrauy -> Gradient respect to the biases of the conv layers, shape of (1, 1, 1, nC)
     '''
-    return
+    (A_prev, W, b, hparameters) = conv_cache
+    (m, nH, nW, nC) = A_prev.shape
+    (f, f, nC_prev, nC) = W.shape
+
+    stride, pad = hparameters['stride'], hparameters['pad']
+
+    (m, nH, nW, nC) = dZ.shape
+
+    dA_prev = np.zeros((A_prev.shape))
+    dW = np.zeros((W.shape))
+    db = np.zeros((b.shape))
+
+    A_prev_pad = zero_pad(A_prev, pad)
+    dA_prev_pad = zero_pad(dA_prev, pad)
+
+    for i in range(m):
+        a_prev_pad = A_prev_pad[i]
+        da_prev_pad = dA_prev_pad[i]
+
+        for h in range(nH):
+            for w in range(nW):
+                for c in range(nC):
+                    vertical_start = h * stride
+                    vertical_end = vertical_start + f
+
+                    horizontal_start = w * stride
+                    horizontal_end = horizontal_start + f
+
+                    a_slice = a_prev_pad[vertical_start:vertical_end, horizontal_start:horizontal_end, :]
+
+                    da_prev_pad[vertical_start:vertical_end, horizontal_start:horizontal_end, :] += W[:, :, :, c] * dZ[i, h, w, c]
+                    dW[:, :, :, c] += a_slice * dZ[i, h, w, c]
+                    db[:, :, :, c] += dZ[i, h, w, c]
+
+                    dA_prev[i, :, :, :] = da_prev_pad[pad:-pad, pad:-pad, :]
+
+    return dA_prev, dW, db
+
+
+
