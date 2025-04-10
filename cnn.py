@@ -1,8 +1,25 @@
 import numpy as np
 
+# /----------------------------------------------------------/
+# Activation functions
+def sigmoid(x):
+    return 1. /(1 + np.exp(-x))
+
+def sigmoid_derivative(values):
+    return values * (1 - values)
+
+def relu(x):
+    return np.maximum(0, x)
+
+def relu_derivative(values):
+    return np.where(values > 0, 1, 0)
+
+# /----------------------------------------------------------/
+# Padding for inputs
+
 def zero_pad(X, pad):
     '''
-    Apply padding to a multichannel volume
+    Apply padding to an input volume
 
     Inputs:
     X: numpy.ndarray of shape (m, nH, nW, nC)
@@ -15,147 +32,194 @@ def zero_pad(X, pad):
 
     return X_pad
 
-def forward(A_prev, W, b, hparameters):
-    '''
-    Forward propagation of a ConvNet (Convolve input volume by n-dimensional filters + biases)
+class ConvLayer:
+    def __init__(self, filters, kernel_size, stride, pad):
+        self.nC = filters
+        self.f = kernel_size
+        self.stride = stride
+        self.pad = pad
+        self.W = None
+        self.b = None
+        self.conv_cache = None
 
-    Inputs:
-    A_prev: np.ndarray -> Activation output from the previous layer of shape (m, nH, nW, nC)
-    W: np.ndarray -> Filters of shape (f, f, nC_prev, nC) 
-    b: np.ndarray -> Biases from the current layer of shape (1, 1, 1, nC)
-    hparameters: Dictionary with stride and padding values
+    def forward(self, A_prev):
+        '''
+        Forward propagation for a conv layer
 
-    Returns:
-    Z: np.ndarray of shape (m, nH, nW, nC)
-    cache: tuple -> Saves (A_prev, W, b, hparameters) for backpropagation
-    '''
-    (m, nH_prev, nW_prev, nC_prev) = A_prev.shape
-    (f, f, nC_prev, nC) = W.shape
+        Inputs:
+        A_prev: np.ndarray -> Activation output from the previous layer of shape (m, nH, nW, nC)
+        W: np.ndarray -> Filters of shape (f, f, nC_prev, nC) 
+        b: np.ndarray -> Biases from the current layer of shape (1, 1, 1, nC)
+        hparameters: Dictionary with stride and padding values
 
-    stride, pad = hparameters['stride'], hparameters['pad']
+        Returns:
+        Z: np.ndarray of shape (m, nH, nW, nC)
+        cache: tuple -> Saves (A_prev, W, b, hparameters) for backpropagation
+        '''
+        if self.W is None:
+            nC_prev = A_prev.shape[-1]
+            self.W = np.random.randn(self.f, self.f, nC_prev, self.nC) * np.sqrt(2. / (self.f * self.f * nC_prev))
+            self.b = np.zeros((1, 1, 1, self.nC))
 
-    nH = int(((nH_prev - f + 2 * pad)/stride) + 1)
-    nW = int(((nW_prev - f + 2 * pad)/stride) + 1)
+        m, nH_prev, nW_prev, nC_prev = A_prev.shape
+        f_h, f_w = self.f, self.f
 
-    Z = np.zeros((m, nH, nW, nC))
+        nH = int((nH_prev - self.f + 2 * self.pad)/self.stride) + 1
+        nW = int((nW_prev - self.f + 2 * self.pad)/self.stride) + 1
 
-    A_prev_pad = zero_pad(A_prev, pad)
+        Z = np.zeros((m, nH, nW, self.nC))
+        A_prev_pad = zero_pad(A_prev, self.pad) if self.pad > 0 else A_prev
 
-    for i in range(m):
-        a_prev_pad = A_prev_pad[i]
+        for i in range(m):
+            for h in range(nH):
+                h_start = h * self.stride
+                h_end = h_start + f_h
 
-        for h in range(nH):
-            vertical_start = h * stride
-            vertical_end = vertical_start + f
+                for w in range(nW):
+                    w_start = w * self.stride
+                    w_end = w_start + f_w
 
-            for w in range(nW):
-                horizontal_start = w * stride
-                horizontal_end = horizontal_start + f
+                    # Vectorized implementation
+                    a_slice = A_prev_pad[i, h_start:h_end, w_start:w_end, :]
+                    Z[i, h, w, :] = np.sum(a_slice[:,:,:,np.newaxis] * self.W, axis=(0,1,2))+ self.b[0,0,0,:]
 
-                for c in range(nC):
-                    a_slice_prev = a_prev_pad[vertical_start:vertical_end, horizontal_start:horizontal_end, :]
+        self.conv_cache = (A_prev, self.W, self.b, {'stride': self.stride, 'pad': self.pad})
 
-                    weights = W[:, :, : , c]
-                    biases = b[:, :, : , c]
+        return Z, self.conv_cache
+    
+    def conv_backward(self, dZ):
+        '''
+        Backpropagation for a conv layer
 
-                    Z[i, h, w, c] = np.sum(a_slice_prev *  weights) + biases
+        Inputs:
+        dZ: np.ndarray -> Gradient of the loss function respect to the output of the conv layer, shape of (m, nH, nW, nC)
+        cache: tuple that forward prop function returned
 
-    conv_cache = (A_prev, W, b, hparameters)
+        Returns:
+        dA_prev: np.ndarray -> Gradient of the loss respect to the previous input of the conv layers, shape of (m, nH_prev, nW_prev, nC_prev)
+        dW: np.ndarray -> Gradient respect to the weights of the conv layers, shape of (f, f, nC_prev, nC)
+        db: np.ndarrauy -> Gradient respect to the biases of the conv layers, shape of (1, 1, 1, nC)
+        '''
+        (A_prev, W, b, hparameters) = self.conv_cache
+        stride, pad = hparameters['stride'], hparameters['pad']
 
-    return Z, conv_cache
+        (m, nH_prev, nW_prev, nC_prev) = A_prev.shape
+        (f, f, nC_prev, nC) = W.shape
+        (m, nH, nW, nC) = dZ.shape
 
-def max_pooling(A_prev, hparameters):
-    '''
-    Apply forward Max Pooling 
+        dA_prev = np.zeros((m, nH_prev, nW_prev, nC_prev)) 
+        dW = np.zeros((W.shape))
+        db = np.zeros((b.shape))
 
-    Inputs:
-    A_prev: np.ndarray -> Input volume of shape (m, nH_prev, nW_prev, nC_prev)
-    hparameters: dictionary containing padding and stride values
+        A_prev_pad = zero_pad(A_prev, pad)
+        dA_prev_pad = np.zeros_like(A_prev_pad)
 
-    Returns:
-    A = np.ndarray -> Output of the pool layer of shape (m, nH, nW, nC)
-    cache = tuple for backpropagation in pooling layer
-    '''
-    (m , nH_prev, nW_prev, nC_prev) = A_prev.shape
+        for i in range(m):
+            a_prev_pad = A_prev_pad[i]
+            da_prev_pad = dA_prev_pad[i]
 
-    f = hparameters['f']
-    stride = hparameters['stride']
+            for h in range(nH):
+                for w in range(nW):
+                    for c in range(nC):
+                        vertical_start = h * stride
+                        vertical_end = vertical_start + f
 
-    # Set output's dimension
-    nH = int(1 + (nH_prev - f) / stride)
-    nW = int(1 + (nH_prev - f) / stride)
-    nC = nC_prev
+                        horizontal_start = w * stride
+                        horizontal_end = horizontal_start + f
 
-    A = np.zeros((m, nH, nW, nC))
+                        a_slice = a_prev_pad[vertical_start:vertical_end, horizontal_start:horizontal_end, :]
 
-    for i in range(m):
-        for h in range(nH):
-            vertical_start = h * stride
-            vertical_end = vertical_start + 1
+                        da_prev_pad[vertical_start:vertical_end, horizontal_start:horizontal_end, :] += W[:, :, :, c] * dZ[i, h, w, c]
+                        dW[:, :, :, c] += a_slice * dZ[i, h, w, c]
+                        db[:, :, :, c] += dZ[i, h, w, c]
 
-            for w in range(nW):
-                horizontal_start = w * stride
-                horizontal_end = horizontal_start + 1
+                        dA_prev[i, :, :, :] = da_prev_pad[pad:-pad, pad:-pad, :] if pad else da_prev_pad
 
-                for c in range(nC):
-                    a_prev_slice = A_prev[i, vertical_start:vertical_end, horizontal_start:horizontal_end, c]
+        dW /= m
+        db /= m
 
-                    A[i, h, w, c] = np.max(a_prev_slice)
+        return dA_prev, dW, db
 
-    pool_cache = (A_prev, hparameters)
+class MaxPoolingLayer:
+    def __init__(self, pool_size, stride):
+        self.f = pool_size if isinstance(pool_size, tuple) else (pool_size, pool_size)
+        self.stride = stride
+        self.pool_cache = None
 
-    return A, pool_cache
+    def forward(self, A_prev):
+        '''
+        Forward prop for a max pooling layer
 
-def conv_backward(dZ, conv_cache):
-    '''
-    Backpropagation for a convolutional function
+        Inputs:
+        A_prev: np.ndarray -> Input volume of shape (m, nH_prev, nW_prev, nC_prev)
+        hparameters: dictionary containing padding and stride values
 
-    Inputs:
-    dZ: np.ndarray -> Gradient of the loss function respect to the output of the conv layer, shape of (m, nH, nW, nC)
-    cache: tuple that forward prop function returned
+        Returns:
+        A = np.ndarray -> Output of the pool layer of shape (m, nH, nW, nC)
+        cache = tuple for backpropagation in pooling layer
+        '''
+        (m , nH_prev, nW_prev, nC_prev) = A_prev.shape
+        f_w, f_h = self.f    
 
-    Returns:
-    dA_prev: np.ndarray -> Gradient of the loss respect to the previous input of the conv layers, shape of (m, nH_prev, nW_prev, nC_prev)
-    dW: np.ndarray -> Gradient respect to the weights of the conv layers, shape of (f, f, nC_prev, nC)
-    db: np.ndarrauy -> Gradient respect to the biases of the conv layers, shape of (1, 1, 1, nC)
-    '''
-    (A_prev, W, b, hparameters) = conv_cache
-    (m, nH, nW, nC) = A_prev.shape
-    (f, f, nC_prev, nC) = W.shape
+        # Set output's dimension
+        nH = int((nH_prev - f_h) / self.stride) + 1
+        nW = int((nW_prev - f_w) / self.stride) + 1
 
-    stride, pad = hparameters['stride'], hparameters['pad']
+        A = np.zeros((m, nH, nW, nC_prev))
 
-    (m, nH, nW, nC) = dZ.shape
+        for i in range(m):
+            for h in range(nH):
+                h_start = h * self.stride
+                h_end = h_start + f_h
 
-    dA_prev = np.zeros((A_prev.shape))
-    dW = np.zeros((W.shape))
-    db = np.zeros((b.shape))
+                for w in range(nW):
+                    w_start = w * self.stride
+                    w_end = w_start + f_w
 
-    A_prev_pad = zero_pad(A_prev, pad)
-    dA_prev_pad = zero_pad(dA_prev, pad)
+                    for c in range(nC_prev):
+                        a_prev_slice = A_prev[i, h_start:h_end, w_start:w_end, c]
+                        A[i, h, w, c] = np.max(a_prev_slice)
 
-    for i in range(m):
-        a_prev_pad = A_prev_pad[i]
-        da_prev_pad = dA_prev_pad[i]
+        self.pool_cache = (A_prev, {'f' : self.f, 'stride' : self.stride})
 
-        for h in range(nH):
-            for w in range(nW):
-                for c in range(nC):
-                    vertical_start = h * stride
-                    vertical_end = vertical_start + f
+        return A, self.pool_cache
+    
+    def backward(self, dA):
+        '''
+        Backpropagation for a max pooling layer
 
-                    horizontal_start = w * stride
-                    horizontal_end = horizontal_start + f
+        Inputs:
+        dA: np.ndarray -> Gradient of the loss function with respect of the output of the pooling layer. Same shape as A
+        cache: tuple -> Cache output of the pooling layer, contains layer's and hparameters
 
-                    a_slice = a_prev_pad[vertical_start:vertical_end, horizontal_start:horizontal_end, :]
+        Returns:
+        dA_prev -> Gradient of the loss with respect of the input of the input of the pooling layer. Same shape as dA_prev
+        '''
+        (A_prev, hparameters) = self.pool_cache
 
-                    da_prev_pad[vertical_start:vertical_end, horizontal_start:horizontal_end, :] += W[:, :, :, c] * dZ[i, h, w, c]
-                    dW[:, :, :, c] += a_slice * dZ[i, h, w, c]
-                    db[:, :, :, c] += dZ[i, h, w, c]
+        stride = hparameters['stride']
+        f_h, f_w = hparameters['f']
 
-                    dA_prev[i, :, :, :] = da_prev_pad[pad:-pad, pad:-pad, :]
+        m, nH_prev, nW_prev, nC_prev = A_prev.shape
+        m, nH, nW, nC = dA.shape
 
-    return dA_prev, dW, db
+        dA_prev = np.zeros((A_prev.shape))
 
+        for i in range(m):
+            a_prev = A_prev[i]
 
+            for h in range(nH):
+                for w in range(nW):
+                    for c in range(nC):
 
+                        h_start = h * stride
+                        h_end = h_start + f_h
+
+                        w_start = w * stride
+                        w_end = w_start + f_w
+
+                        a_prev_slice = a_prev[h_start:h_end, w_start:w_end, c]
+                        mask = (a_prev_slice == np.max(a_prev_slice))
+                        dA_prev[i, h_start:h_end, w_start:w_end, c] += mask * dA[i, h, w, c]
+
+        return dA_prev
