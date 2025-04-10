@@ -14,6 +14,10 @@ def relu(x):
 def relu_derivative(values):
     return np.where(values > 0, 1, 0)
 
+def softmax(x):
+    e_z = np.exp(x - np.max(x))
+    return e_z / e_z.sum()
+
 # /----------------------------------------------------------/
 # Padding for inputs
 
@@ -223,3 +227,36 @@ class MaxPoolingLayer:
                         dA_prev[i, h_start:h_end, w_start:w_end, c] += mask * dA[i, h, w, c]
 
         return dA_prev
+    
+class FCLayer:
+    def __init__(self, input_size, output_size, activation):
+        self.W = np.random.randn(input_size, output_size) * np.sqrt(2./input_size)
+        self.b = np.zeros((1, output_size))
+        self.activation = activation
+        self.cache = None 
+
+    def linear_forward(self, A):
+        Z = np.dot(self.W, A) + self.b
+        self.cache = (A, self.W, self.b)
+
+        return Z, self.cache
+
+    def forward_activation(self, A_prev, activation):
+        Z, linear_cache = self.linear_forward(A_prev, self.W, self.b)
+
+        if self.activation == 'relu':
+            A = relu(Z)
+        elif self.activation == 'softmax':
+            A = softmax(Z)
+        elif self.activation == 'sigmoid':
+            A = sigmoid(Z)
+        
+        activation_cache = Z
+        self.cache = (linear_cache, activation_cache)
+
+        return A, self.cache
+    
+    def forward(self, X):
+        pass
+
+
