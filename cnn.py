@@ -230,33 +230,34 @@ class MaxPoolingLayer:
     
 class FCLayer:
     def __init__(self, input_size, output_size, activation):
-        self.W = np.random.randn(input_size, output_size) * np.sqrt(2./input_size)
-        self.b = np.zeros((1, output_size))
+        self.W = np.random.randn(output_size, input_size) * np.sqrt(2./input_size)
+        self.b = np.zeros((output_size, 1))
         self.activation = activation
-        self.cache = None 
+        self.caches = [] 
 
     def linear_forward(self, A):
         Z = np.dot(self.W, A) + self.b
-        self.cache = (A, self.W, self.b)
+        cache = (A, self.W, self.b)
 
-        return Z, self.cache
-
-    def forward_activation(self, A_prev, activation):
-        Z, linear_cache = self.linear_forward(A_prev, self.W, self.b)
+        return Z, cache
+    
+    def forward(self, X):
+        A_prev = X
+        Z, linear_cache = self.linear_forward(A_prev)
 
         if self.activation == 'relu':
             A = relu(Z)
-        elif self.activation == 'softmax':
+        elif self.activation == 'softmax':  
             A = softmax(Z)
         elif self.activation == 'sigmoid':
             A = sigmoid(Z)
-        
-        activation_cache = Z
-        self.cache = (linear_cache, activation_cache)
 
-        return A, self.cache
-    
-    def forward(self, X):
+        activation_cache = Z
+        self.caches.append((linear_cache, activation_cache))
+
+        return A, self.caches
+
+    def backward():
         pass
 
 
