@@ -233,7 +233,8 @@ class FCLayer:
         self.W = np.random.randn(output_size, input_size) * np.sqrt(2./input_size)
         self.b = np.zeros((output_size, 1))
         self.activation = activation
-        self.caches = [] 
+        self.caches = []
+        self.grads = {} 
 
     def linear_forward(self, A):
         Z = np.dot(self.W, A) + self.b
@@ -242,6 +243,7 @@ class FCLayer:
         return Z, cache
     
     def forward(self, X):
+        '''Implement full forward propagation for a fully connected layer '''
         A_prev = X
         Z, linear_cache = self.linear_forward(A_prev)
 
@@ -256,8 +258,36 @@ class FCLayer:
         self.caches.append((linear_cache, activation_cache))
 
         return A, self.caches
+    
+    def linear_backward(self, dZ):
+        A_prev, W, b = self.caches
+        m = A_prev.shape[1]
 
-    def backward():
-        pass
+        dW = 1/m * np.dot(dZ, A_prev.T)
+        db = 1/m * np.sum(dZ, axis=1, keepdims=True)
+        dA_prev = np.dot(W.T, dZ)
+
+        return dA_prev, dW, db
+
+    def backward(self, dA, Y=None):
+        ''' Backpropagation for a fully connected layer'''
+        Z = self.caches
+
+        if Y is not None:
+            A = np.clip(A, 1e-10, 1 - 1e-10)
+            dA = - (np.divide(Y, A) - np.divide(1 - Y, 1 - A))
+
+        if self.activation == 'relu':
+            dZ = dA * np.where(Z > 0, 1, 0)
+        elif self.activation == 'sigmoid':
+            dZ = dA * sigmoid_derivative(Z)
+
+        dA_prev, dW, db = self.linear_backward(dZ)
+        self.grads[f'dA'] = dA_prev  # TODO: Enumerate hidden layers
+        self.grads[f'dW'] = dW
+        self.grads[f'db'] = db
+
+        return self.grads
+
 
 
